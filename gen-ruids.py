@@ -97,7 +97,6 @@ def _parse_response(response: httpx.Response, page_index: int, all_tags: Dict[st
         tag: Current category tag being processed
     """
     if not is_valid_api_response(response):
-        logger.error(f"Page {page_index} has invalid response")
         return
 
     done_pages.add(page_index)

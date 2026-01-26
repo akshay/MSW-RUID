@@ -11,7 +11,7 @@ import os
 from typing import Dict, List, Optional, Tuple
 import httpx
 
-CONCURRENCY = 8
+CONCURRENCY = 4
 TIMEOUT_SEC = 15.0
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -44,7 +44,6 @@ def is_valid_api_response(response: httpx.Response) -> bool:
         return False
 
     if response.status_code != 200:
-        logger.error(f"HTTP {response.status_code} error")
         return False
 
     try:
@@ -93,7 +92,8 @@ def extract_best_tags(tags: List[str], etag: str, hashstr: str, category_tag: Op
             if not best_path_name or ('/' not in best_path_name and '/' in tag):
                 best_path_name = tag
             else:
-                logger.warning(f"Duplicate path for {etag}: {best_path_name}, {tag}")
+                pass
+                # logger.warning(f"Duplicate path for {etag}: {best_path_name}, {tag}")
 
     return best_img_name, best_path_name
 
