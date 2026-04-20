@@ -17,6 +17,16 @@ from maplestory_api import (
 
 COUNT = 100
 
+def _done_pages_to_skip(done_pages: Set[int], page_count: int) -> Set[int]:
+    """Skip completed pages except the highest valid one, which is re-fetched each run."""
+    valid_done_pages = {page for page in done_pages if 0 <= page < page_count}
+    if not valid_done_pages:
+        return set()
+
+    valid_done_pages.discard(max(valid_done_pages))
+    return valid_done_pages
+
+
 async def scrape_category(tag: str, all_tags: Dict[str, str], all_guids: Dict[str, str], done_pages: Set[int]) -> None:
     """
     Scrape a specific category for resource data.
@@ -43,6 +53,7 @@ async def scrape_category(tag: str, all_tags: Dict[str, str], all_guids: Dict[st
         return
 
     logger.info(f"Found {page_count} pages for {tag}")
+    pages_to_skip = _done_pages_to_skip(done_pages, page_count)
 
     async with httpx.AsyncClient(headers=headers) as client:
         async def fetch_page(page_num: int) -> httpx.Response:
@@ -51,7 +62,7 @@ async def scrape_category(tag: str, all_tags: Dict[str, str], all_guids: Dict[st
 
         for batch_start in range(0, page_count, CONCURRENCY):
             batch_end = min(page_count, batch_start + CONCURRENCY)
-            page_indices = [p for p in range(batch_start, batch_end) if p not in done_pages]
+            page_indices = [p for p in range(batch_start, batch_end) if p not in pages_to_skip]
 
             if not page_indices:
                 continue
@@ -198,6 +209,7 @@ async def scrape_populate_category(tag: str, populate_entries: Dict[str, str], d
         return
 
     logger.info(f"Found {page_count} populate pages for {tag}")
+    pages_to_skip = _done_pages_to_skip(done_pages, page_count)
 
     async with httpx.AsyncClient(headers=headers) as client:
         async def fetch_page(page_num: int) -> httpx.Response:
@@ -206,7 +218,7 @@ async def scrape_populate_category(tag: str, populate_entries: Dict[str, str], d
 
         for batch_start in range(0, page_count, CONCURRENCY):
             batch_end = min(page_count, batch_start + CONCURRENCY)
-            page_indices = [p for p in range(batch_start, batch_end) if p not in done_pages]
+            page_indices = [p for p in range(batch_start, batch_end) if p not in pages_to_skip]
 
             if not page_indices:
                 continue

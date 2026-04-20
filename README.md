@@ -46,7 +46,7 @@ It also builds `populate.json` for hidden resource categories that need GUID-spe
 
 - **Category-based scraping**: Processes different asset categories (sprites, sounds, character parts, etc.)
 - **Concurrent processing**: Uses async/await with configurable concurrency for efficient API usage
-- **Resume capability**: Tracks completed pages and can resume interrupted scraping sessions
+- **Resume capability**: Tracks completed pages and can resume interrupted scraping sessions while always re-fetching the last completed page to catch tail-page additions
 
 #### Usage
 
