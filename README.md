@@ -109,10 +109,11 @@ python pop-ruids.py
 
 #### Output Files
 
-- `tags/populate_tags.json`: Maps display names to GUIDs
-- `guids/populate_guids.json`: Maps GUIDs to image paths
+- `tags/<category>_tags.json`: Manifest-backed GUIDs are written to their category file, such as `tags/back_tags.json`
+- `guids/<category>_guids.json`: Manifest-backed GUIDs are written to their category file, such as `guids/back_guids.json`
+- `tags/populate_tags.json` and `guids/populate_guids.json`: Fallback outputs for GUIDs that come only from `populate.txt` and have no category in `populate.json`
 
-When a GUID has category metadata in `populate.json`, its tag name is forced to `<category>-<guid>` in `tags/populate_tags.json`.
+When a GUID has category metadata in `populate.json`, its tag name is forced to `<category>-<guid>` in that category's tags file.
 `pop-ruids.py` processes the union of GUIDs from `populate.txt` and `populate.json`.
 
 ## Configuration
@@ -138,9 +139,11 @@ ruid/
 ├── populate.txt              # Input file for pop-ruids.py
 ├── tags/                     # Tag-to-GUID mappings
 │   ├── sprite_tags.json
+│   ├── back_tags.json
 │   └── populate_tags.json
 ├── guids/                    # GUID-to-path mappings
 │   ├── sprite_guids.json
+│   ├── back_guids.json
 │   └── populate_guids.json
 └── done/                     # Progress tracking
     └── sprite_done.json

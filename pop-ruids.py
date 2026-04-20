@@ -6,7 +6,7 @@ by querying the Nexon MapleStory Worlds API.
 """
 
 import asyncio
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 import httpx
 
 from maplestory_api import (
@@ -15,22 +15,56 @@ from maplestory_api import (
     CONCURRENCY, TIMEOUT_SEC, logger
 )
 
+def _get_output_paths(category_tag: Optional[str]) -> Tuple[str, str]:
+    """Resolve the output JSON paths for a category-backed or generic populate run."""
+    output_tag = category_tag or 'populate'
+    return f'tags/{output_tag}_tags.json', f'guids/{output_tag}_guids.json'
+
+
+def _load_output_store(category_tag: Optional[str],
+                       store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]
+                       ) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Load and cache the output store for one category."""
+    output_tag = category_tag or 'populate'
+    if output_tag not in store_cache:
+        tags_path, guids_path = _get_output_paths(category_tag)
+        store_cache[output_tag] = (
+            load_json_file(tags_path, f'{output_tag} tags'),
+            load_json_file(guids_path, f'{output_tag} guids'),
+        )
+    return store_cache[output_tag]
+
+
+def _filter_new_guids(guids_to_populate: List[str], category_by_guid: Dict[str, str],
+                      store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]) -> List[str]:
+    """Keep only GUIDs that are missing from their target output store."""
+    new_guids: List[str] = []
+
+    for guid in guids_to_populate:
+        category_tag = category_by_guid.get(guid)
+        _, all_guids = _load_output_store(category_tag, store_cache)
+        if guid not in all_guids:
+            new_guids.append(guid)
+
+    return new_guids
+
+
 async def populate_guids(guids_to_populate: List[str], category_by_guid: Dict[str, str],
-                         all_tags: Dict[str, str], all_guids: Dict[str, str]) -> None:
+                         store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]) -> None:
     """
     Populate metadata for specific GUIDs.
 
     Args:
         guids_to_populate: List of GUIDs to fetch metadata for
         category_by_guid: Optional category metadata loaded from populate.json
-        all_tags: Dictionary to store tag->GUID mappings
-        all_guids: Dictionary to store GUID->path mappings
+        store_cache: Cached tag/GUID stores keyed by output category
     """
     base_url = 'https://mverse-api.nexon.com/resource/v1/search'
     headers = get_request_headers()
 
     # Filter out GUIDs we already have
-    new_guids = [guid for guid in guids_to_populate if guid not in all_guids]
+    new_guids = _filter_new_guids(guids_to_populate, category_by_guid, store_cache)
+
     if not new_guids:
         logger.info('All GUIDs already populated, nothing to scrape')
         return
@@ -56,11 +90,11 @@ async def populate_guids(guids_to_populate: List[str], category_by_guid: Dict[st
             responses = await asyncio.gather(*[fetch_guid_data(i) for i in batch_indices], return_exceptions=True)
 
             for i, response in enumerate(responses):
-                _parse_response(response, batch_indices[i], new_guids, category_by_guid, all_tags, all_guids)
+                _parse_response(response, batch_indices[i], new_guids, category_by_guid, store_cache)
 
 def _parse_response(response: httpx.Response, index: int, guids_list: List[str],
-                   category_by_guid: Dict[str, str], all_tags: Dict[str, str],
-                   all_guids: Dict[str, str]) -> None:
+                   category_by_guid: Dict[str, str],
+                   store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]) -> None:
     """
     Parse a single API response and extract resource data.
 
@@ -69,8 +103,7 @@ def _parse_response(response: httpx.Response, index: int, guids_list: List[str],
         index: Index in the guids_list
         guids_list: List of GUIDs being processed
         category_by_guid: GUID->category mappings from populate.json
-        all_tags: Dictionary to store tag->GUID mappings
-        all_guids: Dictionary to store GUID->path mappings
+        store_cache: Cached tag/GUID stores keyed by output category
     """
     if not is_valid_api_response(response):
         logger.error(f"GUID {index} ({guids_list[index] if index < len(guids_list) else 'unknown'}) has invalid response")
@@ -79,6 +112,7 @@ def _parse_response(response: httpx.Response, index: int, guids_list: List[str],
     current_guid = guids_list[index] if index < len(guids_list) else ''
     category_tag = category_by_guid.get(current_guid)
     tag_name = f"{category_tag}-{current_guid}" if category_tag and current_guid else None
+    all_tags, all_guids = _load_output_store(category_tag, store_cache)
 
     data = response.json()
     for item in data['data']['matches']:
@@ -131,25 +165,20 @@ def _build_populate_worklist(populate_guids: List[str], category_by_guid: Dict[s
     return ordered_guids
 
 
-def _load_existing_data() -> tuple[Dict[str, str], Dict[str, str]]:
-    """Load existing tags and GUIDs data."""
-    all_tags = load_json_file('tags/populate_tags.json', 'populate tags')
-    all_guids = load_json_file('guids/populate_guids.json', 'populate guids')
-    return all_tags, all_guids
+def _save_results(store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]) -> None:
+    """Save all touched output stores."""
+    for output_tag, (all_tags, all_guids) in store_cache.items():
+        tags_path, guids_path = _get_output_paths(None if output_tag == 'populate' else output_tag)
+        success_count = 0
 
+        if save_json_file(guids_path, all_guids, f'{output_tag} guids'):
+            success_count += 1
 
-def _save_results(all_tags: Dict[str, str], all_guids: Dict[str, str]) -> None:
-    """Save results to JSON files."""
-    success_count = 0
+        if save_json_file(tags_path, all_tags, f'{output_tag} tags'):
+            success_count += 1
 
-    if save_json_file('guids/populate_guids.json', all_guids, 'populate guids'):
-        success_count += 1
-
-    if save_json_file('tags/populate_tags.json', all_tags, 'populate tags'):
-        success_count += 1
-
-    if success_count > 0:
-        logger.info(f"Saved {len(all_tags)} tags and {len(all_guids)} GUIDs")
+        if success_count > 0:
+            logger.info(f"Saved {len(all_tags)} tags and {len(all_guids)} GUIDs for {output_tag}")
 
 
 def main() -> None:
@@ -171,16 +200,16 @@ def main() -> None:
         f"{len(category_by_guid)} GUIDs from populate.json "
         f"({len(guids_to_populate)} unique GUIDs total)"
     )
-    all_tags, all_guids = _load_existing_data()
+    store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]] = {}
 
     try:
-        asyncio.run(populate_guids(guids_to_populate, category_by_guid, all_tags, all_guids))
+        asyncio.run(populate_guids(guids_to_populate, category_by_guid, store_cache))
     except KeyboardInterrupt:
         logger.info("Interrupted by user - saving current progress")
     except Exception as e:
         logger.error(f"Error during processing: {e}")
 
-    _save_results(all_tags, all_guids)
+    _save_results(store_cache)
 
 
 if __name__ == "__main__":
