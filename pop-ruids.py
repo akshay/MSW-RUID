@@ -72,51 +72,71 @@ def _find_existing_tag_name(category_tag: Optional[str], guid: str, all_tags: Di
     return preferred_tag or fallback_tag
 
 
+def _build_guid_tag_name_index(category_tag: Optional[str], all_tags: Dict[str, str]) -> Dict[str, str]:
+    """Build a GUID->tag index, preferring payload-derived tags over fallback names."""
+    guid_tag_names: Dict[str, str] = {}
+
+    for tag_name, guid in all_tags.items():
+        current_tag_name = guid_tag_names.get(guid)
+        if current_tag_name is None:
+            guid_tag_names[guid] = tag_name
+            continue
+
+        if _is_fallback_tag(category_tag, current_tag_name, guid) and not _is_fallback_tag(category_tag, tag_name, guid):
+            guid_tag_names[guid] = tag_name
+
+    return guid_tag_names
+
+
 def _normalize_tag_store(category_tag: Optional[str], all_tags: Dict[str, str]) -> None:
     """Collapse duplicate GUID mappings, preferring payload-derived tags over fallback names."""
     if not category_tag:
         return
 
-    normalized_tags: Dict[str, str] = {}
-    seen_guids: Set[str] = set()
-    for tag_name, guid in all_tags.items():
-        if guid in seen_guids:
-            continue
-        preferred_tag = _find_existing_tag_name(category_tag, guid, all_tags) or tag_name
-        normalized_tags[preferred_tag] = guid
-        seen_guids.add(guid)
-
+    guid_tag_names = _build_guid_tag_name_index(category_tag, all_tags)
+    normalized_tags = {
+        tag_name: guid
+        for guid, tag_name in guid_tag_names.items()
+    }
     all_tags.clear()
     all_tags.update(normalized_tags)
 
 
-def _guid_needs_reprocessing(category_tag: Optional[str], guid: str, all_tags: Dict[str, str]) -> bool:
+def _guid_needs_reprocessing(category_tag: Optional[str], guid: str,
+                             known_tag_guids: Set[str],
+                             guid_tag_names: Dict[str, str]) -> bool:
     """Re-fetch GUIDs whose category store still only has a synthetic fallback tag."""
     if not category_tag:
         return False
 
-    tag_name = _find_existing_tag_name(category_tag, guid, all_tags)
+    if guid not in known_tag_guids:
+        return True
+
+    tag_name = guid_tag_names.get(guid)
     return tag_name is None or _is_fallback_tag(category_tag, tag_name, guid)
 
 
 def _load_output_store(category_tag: Optional[str],
-                       store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]
-                       ) -> Tuple[Dict[str, str], Dict[str, str]]:
+                       store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, str]]]
+                       ) -> Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, str]]:
     """Load and cache the output store for one category."""
     output_tag = category_tag or 'populate'
     if output_tag not in store_cache:
         tags_path, guids_path = _get_output_paths(category_tag)
         all_tags = load_json_file(tags_path, f'{output_tag} tags')
         _normalize_tag_store(category_tag, all_tags)
+        guid_tag_names = _build_guid_tag_name_index(category_tag, all_tags)
         store_cache[output_tag] = (
             all_tags,
             load_json_file(guids_path, f'{output_tag} guids'),
+            set(guid_tag_names.keys()),
+            guid_tag_names,
         )
     return store_cache[output_tag]
 
 
 def _filter_new_guids(guids_to_populate: List[str], category_by_guid: Dict[str, str],
-                      store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]) -> List[str]:
+                      store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, str]]]) -> List[str]:
     """Keep GUIDs that are missing or still need payload-based tag repair."""
     new_guids: List[str] = []
     total_guids = len(guids_to_populate)
@@ -124,8 +144,8 @@ def _filter_new_guids(guids_to_populate: List[str], category_by_guid: Dict[str, 
 
     for index, guid in enumerate(guids_to_populate, start=1):
         category_tag = category_by_guid.get(guid)
-        all_tags, all_guids = _load_output_store(category_tag, store_cache)
-        if guid not in all_guids or _guid_needs_reprocessing(category_tag, guid, all_tags):
+        _, all_guids, known_tag_guids, guid_tag_names = _load_output_store(category_tag, store_cache)
+        if guid not in all_guids or _guid_needs_reprocessing(category_tag, guid, known_tag_guids, guid_tag_names):
             new_guids.append(guid)
         if index % 10000 == 0 or index == total_guids:
             logger.info(f'Filtered {index}/{total_guids} candidate GUIDs')
@@ -151,7 +171,7 @@ def _resolve_tag_name(item: Dict[str, str], category_tag: Optional[str], current
 
 
 async def populate_guids(guids_to_populate: List[str], category_by_guid: Dict[str, str],
-                         store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]) -> None:
+                         store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, str]]]) -> None:
     """
     Populate metadata for specific GUIDs.
 
@@ -195,7 +215,7 @@ async def populate_guids(guids_to_populate: List[str], category_by_guid: Dict[st
 
 def _parse_response(response: httpx.Response, index: int, guids_list: List[str],
                    category_by_guid: Dict[str, str],
-                   store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]) -> None:
+                   store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, str]]]) -> None:
     """
     Parse a single API response and extract resource data.
 
@@ -212,7 +232,7 @@ def _parse_response(response: httpx.Response, index: int, guids_list: List[str],
 
     current_guid = guids_list[index] if index < len(guids_list) else ''
     category_tag = category_by_guid.get(current_guid)
-    all_tags, all_guids = _load_output_store(category_tag, store_cache)
+    all_tags, all_guids, _, _ = _load_output_store(category_tag, store_cache)
 
     data = response.json()
     for item in data['data']['matches']:
@@ -335,9 +355,9 @@ def _build_populate_worklist(populate_guids: List[str], discovered_store_guids: 
     return ordered_guids
 
 
-def _save_results(store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]) -> None:
+def _save_results(store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, str]]]) -> None:
     """Save all touched output stores."""
-    for output_tag, (all_tags, all_guids) in store_cache.items():
+    for output_tag, (all_tags, all_guids, _, _) in store_cache.items():
         tags_path, guids_path = _get_output_paths(None if output_tag == 'populate' else output_tag)
         success_count = 0
 
@@ -388,7 +408,7 @@ def main() -> None:
         f"discovered {len(discovered_store_guids)} missing GUID entries from category tags "
         f"({len(guids_to_populate)} unique GUIDs total){category_filter_suffix}"
     )
-    store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]] = {}
+    store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str], Set[str], Dict[str, str]]] = {}
 
     try:
         asyncio.run(populate_guids(guids_to_populate, category_by_guid, store_cache))
