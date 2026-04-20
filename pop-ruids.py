@@ -5,8 +5,9 @@ This script fetches detailed resource metadata for specific GUIDs from a populat
 by querying the Nexon MapleStory Worlds API.
 """
 
+import argparse
 import asyncio
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 import httpx
 
 from maplestory_api import (
@@ -14,6 +15,30 @@ from maplestory_api import (
     load_json_file, save_json_file, validate_api_token,
     CONCURRENCY, TIMEOUT_SEC, logger
 )
+
+
+def _parse_args() -> argparse.Namespace:
+    """Parse CLI arguments for category-limited population."""
+    parser = argparse.ArgumentParser(description='Populate MapleStory Worlds resource metadata by GUID.')
+    parser.add_argument(
+        '-c',
+        '--category',
+        action='append',
+        default=[],
+        help='Only process these populate categories. Repeat the flag or use comma-separated values.',
+    )
+    return parser.parse_args()
+
+
+def _parse_category_filters(raw_values: List[str]) -> Optional[Set[str]]:
+    """Normalize repeated/comma-separated category arguments into a set."""
+    allowed_categories = {
+        category.strip()
+        for raw_value in raw_values
+        for category in raw_value.split(',')
+        if category.strip()
+    }
+    return allowed_categories or None
 
 def _get_output_paths(category_tag: Optional[str]) -> Tuple[str, str]:
     """Resolve the output JSON paths for a category-backed or generic populate run."""
@@ -147,17 +172,23 @@ def _load_populate_categories(filename: str = 'populate.json') -> Dict[str, str]
     }
 
 
-def _build_populate_worklist(populate_guids: List[str], category_by_guid: Dict[str, str]) -> List[str]:
+def _build_populate_worklist(populate_guids: List[str], category_by_guid: Dict[str, str],
+                             allowed_categories: Optional[Set[str]] = None) -> List[str]:
     """Merge GUIDs from populate.txt and populate.json while preserving first-seen order."""
     ordered_guids: List[str] = []
     seen_guids = set()
 
     for guid in populate_guids:
+        category_tag = category_by_guid.get(guid)
+        if allowed_categories is not None and category_tag not in allowed_categories:
+            continue
         if guid not in seen_guids:
             seen_guids.add(guid)
             ordered_guids.append(guid)
 
-    for guid in category_by_guid.keys():
+    for guid, category_tag in category_by_guid.items():
+        if allowed_categories is not None and category_tag not in allowed_categories:
+            continue
         if guid not in seen_guids:
             seen_guids.add(guid)
             ordered_guids.append(guid)
@@ -183,6 +214,8 @@ def _save_results(store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]])
 
 def main() -> None:
     """Main entry point for the script."""
+    args = _parse_args()
+
     try:
         validate_api_token()
     except ValueError:
@@ -190,15 +223,20 @@ def main() -> None:
 
     populate_list_guids = _load_populate_list()
     category_by_guid = _load_populate_categories()
-    guids_to_populate = _build_populate_worklist(populate_list_guids, category_by_guid)
+    allowed_categories = _parse_category_filters(args.category)
+    guids_to_populate = _build_populate_worklist(populate_list_guids, category_by_guid, allowed_categories)
     if not guids_to_populate:
-        logger.error("No GUIDs found in populate.txt or populate.json")
+        if allowed_categories:
+            logger.error(f"No GUIDs found for requested categories: {sorted(allowed_categories)}")
+        else:
+            logger.error("No GUIDs found in populate.txt or populate.json")
         return
 
+    category_filter_suffix = f" with category filter {sorted(allowed_categories)}" if allowed_categories else ''
     logger.info(
         f"Loaded {len(populate_list_guids)} GUIDs from populate.txt and "
         f"{len(category_by_guid)} GUIDs from populate.json "
-        f"({len(guids_to_populate)} unique GUIDs total)"
+        f"({len(guids_to_populate)} unique GUIDs total){category_filter_suffix}"
     )
     store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]] = {}
 

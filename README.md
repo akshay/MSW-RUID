@@ -107,6 +107,14 @@ guid-qrst-uvwx-yz12-3456
 python pop-ruids.py
 ```
 
+To limit processing to specific manifest categories:
+
+```bash
+python pop-ruids.py --category back
+python pop-ruids.py --category back,object
+python pop-ruids.py -c back -c object
+```
+
 #### Output Files
 
 - `tags/<category>_tags.json`: Manifest-backed GUIDs are written to their category file, such as `tags/back_tags.json`
@@ -115,6 +123,7 @@ python pop-ruids.py
 
 When a GUID has category metadata in `populate.json`, its tag name is forced to `<category>-<guid>` in that category's tags file.
 `pop-ruids.py` processes the union of GUIDs from `populate.txt` and `populate.json`.
+When `--category` is provided, only GUIDs whose `populate.json` category matches the requested values are processed.
 
 ## Configuration
 

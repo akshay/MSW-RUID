@@ -11,7 +11,7 @@ import os
 from typing import Dict, List, Optional, Tuple
 import httpx
 
-CONCURRENCY = 4
+CONCURRENCY = 1
 TIMEOUT_SEC = 15.0
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
