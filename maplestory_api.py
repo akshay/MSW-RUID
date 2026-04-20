@@ -147,7 +147,7 @@ def should_combine_paths(img_name: str, path_name: str) -> bool:
 
 
 def process_api_item(item: Dict, all_tags: Dict[str, str], all_guids: Dict[str, str],
-                    tag_filter: Optional[str] = None) -> None:
+                    tag_filter: Optional[str] = None, name_override: Optional[str] = None) -> None:
     """
     Process a single resource item from the API response.
 
@@ -157,16 +157,18 @@ def process_api_item(item: Dict, all_tags: Dict[str, str], all_guids: Dict[str, 
         all_guids: Dictionary to store GUID->path mappings
         tag_filter: Optional filter to only process items with tags starting with this prefix
     """
-    etag = item.get('dname', '')
+    api_name = item.get('dname', '')
     guid = item.get('guid', '')
 
-    if not etag or not guid:
+    if not api_name or not guid:
         logger.warning(f"Item missing etag or guid: {item}")
         return
 
     # Apply tag filter if specified
-    if tag_filter and not etag.startswith(f"{tag_filter}-"):
+    if tag_filter and name_override is None and not api_name.startswith(f"{tag_filter}-"):
         return
+
+    etag = name_override or api_name
 
     # Skip if we already have this data
     if etag in all_tags and guid in all_guids:
@@ -175,7 +177,7 @@ def process_api_item(item: Dict, all_tags: Dict[str, str], all_guids: Dict[str, 
     all_tags[etag] = guid
     best_img_name, best_path_name = extract_best_tags(
         item.get('tags', []),
-        etag,
+        api_name,
         item.get('hashstr', ''),
         tag_filter
     )
@@ -230,7 +232,9 @@ def save_json_file(filepath: str, data: Dict, description: str = "data") -> bool
     """
     try:
         # Ensure parent directory exists
-        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        parent_dir = os.path.dirname(filepath)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
 
         with open(filepath, 'w') as f:
             json.dump(data, f, indent=4)

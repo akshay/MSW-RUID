@@ -40,6 +40,7 @@ You must be logged into the [MapleStory Worlds API](https://maplestoryworlds.nex
 ### gen-ruids.py - Category-based Resource Generator
 
 This script scrapes resources by category, discovering all available assets within specified categories.
+It also builds `populate.json` for hidden resource categories that need GUID-specific population later.
 
 #### Features
 
@@ -73,9 +74,13 @@ For each category (e.g., 'sprite'):
 - `guids/sprite_guids.json`: Maps GUIDs to image paths
 - `done/sprite_done.json`: Tracks completed pages for resume functionality
 
+For populate-only categories (for example `chatballoon`, `nametag`, `damageskin`):
+- `populate.json`: Maps GUIDs to category names used by `pop-ruids.py`
+- `done/populate_<category>_done.json`: Tracks completed populate-manifest pages
+
 ### pop-ruids.py - GUID-specific Resource Populator
 
-This script fetches detailed metadata for specific GUIDs listed in a text file.
+This script fetches detailed metadata for specific GUIDs listed in `populate.txt` and/or discovered in `populate.json`.
 
 This is useful for the following categories, which are not listed on the MapleStory Worlds website:
 - Name tag RUIDs
@@ -84,7 +89,9 @@ This is useful for the following categories, which are not listed on the MapleSt
 
 #### Usage
 
-1. Create a `populate.txt` file with GUIDs to process:
+1. Run `gen-ruids.py` when you want to refresh `populate.json` for hidden categories.
+
+2. Optionally create or edit `populate.txt` with additional GUIDs to process:
 
 ```text
 # This is a comment - lines starting with # are ignored
@@ -94,7 +101,7 @@ guid-abcd-efgh-ijkl-mnop
 guid-qrst-uvwx-yz12-3456
 ```
 
-2. Run the script:
+3. Run the script:
 
 ```bash
 python pop-ruids.py
@@ -104,6 +111,9 @@ python pop-ruids.py
 
 - `tags/populate_tags.json`: Maps display names to GUIDs
 - `guids/populate_guids.json`: Maps GUIDs to image paths
+
+When a GUID has category metadata in `populate.json`, its tag name is forced to `<category>-<guid>` in `tags/populate_tags.json`.
+`pop-ruids.py` processes the union of GUIDs from `populate.txt` and `populate.json`.
 
 ## Configuration
 
@@ -124,6 +134,7 @@ ruid/
 ├── maplestory_api.py         # Shared API utilities module
 ├── gen-ruids.py              # Category-based scraper
 ├── pop-ruids.py              # GUID-specific scraper
+├── populate.json             # GUID->category manifest for populate flow
 ├── populate.txt              # Input file for pop-ruids.py
 ├── tags/                     # Tag-to-GUID mappings
 │   ├── sprite_tags.json
