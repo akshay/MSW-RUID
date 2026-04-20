@@ -12,7 +12,7 @@ import httpx
 from maplestory_api import (
     get_request_headers, is_valid_api_response, process_api_item,
     load_json_file, save_json_file, validate_api_token,
-    CONCURRENCY, TIMEOUT_SEC, logger
+    CONCURRENCY, TIMEOUT_SEC, logger, rate_limited_get
 )
 
 COUNT = 100
@@ -58,7 +58,7 @@ async def scrape_category(tag: str, all_tags: Dict[str, str], all_guids: Dict[st
     async with httpx.AsyncClient(headers=headers) as client:
         async def fetch_page(page_num: int) -> httpx.Response:
             params = {**base_params, 'page': page_num + 1}
-            return await client.get(url, params=params, timeout=TIMEOUT_SEC)
+            return await rate_limited_get(client, url, params=params, timeout=TIMEOUT_SEC)
 
         for batch_start in range(0, page_count, CONCURRENCY):
             batch_end = min(page_count, batch_start + CONCURRENCY)
@@ -78,7 +78,7 @@ async def _get_total_pages(url: str, params: Dict, headers: Dict[str, str]) -> i
     """Get the total number of pages for a category."""
     async with httpx.AsyncClient(headers=headers) as client:
         try:
-            response = await client.get(url, params=params, timeout=TIMEOUT_SEC)
+            response = await rate_limited_get(client, url, params=params, timeout=TIMEOUT_SEC)
             if response.status_code != 200:
                 logger.error(f"Failed to get page count: HTTP {response.status_code}")
                 return 0
@@ -214,7 +214,7 @@ async def scrape_populate_category(tag: str, populate_entries: Dict[str, str], d
     async with httpx.AsyncClient(headers=headers) as client:
         async def fetch_page(page_num: int) -> httpx.Response:
             params = {**base_params, 'page': page_num + 1}
-            return await client.get(url, params=params, timeout=TIMEOUT_SEC)
+            return await rate_limited_get(client, url, params=params, timeout=TIMEOUT_SEC)
 
         for batch_start in range(0, page_count, CONCURRENCY):
             batch_end = min(page_count, batch_start + CONCURRENCY)

@@ -7,6 +7,7 @@ by querying the Nexon MapleStory Worlds API.
 
 import argparse
 import asyncio
+import json
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 import httpx
@@ -14,7 +15,7 @@ import httpx
 from maplestory_api import (
     get_request_headers, is_valid_api_response, process_api_item,
     load_json_file, save_json_file, validate_api_token,
-    CONCURRENCY, TIMEOUT_SEC, logger
+    CONCURRENCY, TIMEOUT_SEC, logger, rate_limited_get
 )
 
 
@@ -118,12 +119,16 @@ def _filter_new_guids(guids_to_populate: List[str], category_by_guid: Dict[str, 
                       store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]) -> List[str]:
     """Keep GUIDs that are missing or still need payload-based tag repair."""
     new_guids: List[str] = []
+    total_guids = len(guids_to_populate)
+    logger.info(f'Filtering {total_guids} candidate GUIDs against existing output stores')
 
-    for guid in guids_to_populate:
+    for index, guid in enumerate(guids_to_populate, start=1):
         category_tag = category_by_guid.get(guid)
         all_tags, all_guids = _load_output_store(category_tag, store_cache)
         if guid not in all_guids or _guid_needs_reprocessing(category_tag, guid, all_tags):
             new_guids.append(guid)
+        if index % 10000 == 0 or index == total_guids:
+            logger.info(f'Filtered {index}/{total_guids} candidate GUIDs')
 
     return new_guids
 
@@ -175,7 +180,7 @@ async def populate_guids(guids_to_populate: List[str], category_by_guid: Dict[st
         async def fetch_guid_data(index: int) -> httpx.Response:
             """Fetch data for a single GUID."""
             guid = new_guids[index]
-            return await client.get(f'{base_url}/{guid}', timeout=TIMEOUT_SEC)
+            return await rate_limited_get(client, f'{base_url}/{guid}', timeout=TIMEOUT_SEC)
 
         # Process GUIDs in batches
         for batch_start in range(0, guid_count, CONCURRENCY):
@@ -243,6 +248,33 @@ def _load_populate_categories(filename: str = 'populate.json') -> Dict[str, str]
     }
 
 
+def _iter_json_object_string_items(filepath: Path):
+    """Yield string key/value pairs from generated single-line-per-entry JSON objects."""
+    if not filepath.is_file():
+        return
+
+    with open(filepath, 'r') as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line in {'{', '}', '{}'}:
+                continue
+            if line.endswith(','):
+                line = line[:-1]
+
+            try:
+                item = json.loads(f'{{{line}}}')
+            except json.JSONDecodeError as exc:
+                logger.warning(f'Failed to parse JSON entry from {filepath}: {exc}')
+                continue
+
+            if len(item) != 1:
+                continue
+
+            key, value = next(iter(item.items()))
+            if isinstance(key, str) and isinstance(value, str):
+                yield key, value
+
+
 def _discover_missing_store_guids(allowed_categories: Optional[Set[str]] = None,
                                   tags_dir: str = 'tags',
                                   guids_dir: str = 'guids') -> Dict[str, str]:
@@ -254,35 +286,46 @@ def _discover_missing_store_guids(allowed_categories: Optional[Set[str]] = None,
         if allowed_categories is not None and category_tag not in allowed_categories:
             continue
 
-        all_tags = load_json_file(str(tag_path), f'{category_tag} tags')
         guid_path = Path(guids_dir) / f'{category_tag}_guids.json'
-        all_guids = load_json_file(str(guid_path), f'{category_tag} guids')
+        logger.info(f'Scanning {category_tag} tag store for missing GUID entries')
+        known_guids = {guid for guid, _ in _iter_json_object_string_items(guid_path)}
+        category_missing = 0
 
-        for guid in all_tags.values():
-            if not isinstance(guid, str):
-                continue
-            if guid in all_guids or guid in discovered_guids:
+        for _, guid in _iter_json_object_string_items(tag_path):
+            if guid in known_guids or guid in discovered_guids:
                 continue
             discovered_guids[guid] = category_tag
+            category_missing += 1
+
+        if category_missing > 0:
+            logger.info(f'Discovered {category_missing} missing GUID entries in {category_tag}')
 
     return discovered_guids
 
 
-def _build_populate_worklist(populate_guids: List[str], category_by_guid: Dict[str, str],
+def _build_populate_worklist(populate_guids: List[str], discovered_store_guids: Dict[str, str],
+                             populate_categories: Dict[str, str],
                              allowed_categories: Optional[Set[str]] = None) -> List[str]:
-    """Merge GUIDs from populate.txt and populate.json while preserving first-seen order."""
+    """Merge GUIDs from populate.txt, discovered store gaps, and populate.json by priority."""
     ordered_guids: List[str] = []
     seen_guids = set()
 
     for guid in populate_guids:
-        category_tag = category_by_guid.get(guid)
+        category_tag = discovered_store_guids.get(guid) or populate_categories.get(guid)
         if allowed_categories is not None and category_tag not in allowed_categories:
             continue
         if guid not in seen_guids:
             seen_guids.add(guid)
             ordered_guids.append(guid)
 
-    for guid, category_tag in category_by_guid.items():
+    for guid, category_tag in discovered_store_guids.items():
+        if allowed_categories is not None and category_tag not in allowed_categories:
+            continue
+        if guid not in seen_guids:
+            seen_guids.add(guid)
+            ordered_guids.append(guid)
+
+    for guid, category_tag in populate_categories.items():
         if allowed_categories is not None and category_tag not in allowed_categories:
             continue
         if guid not in seen_guids:
@@ -325,7 +368,12 @@ def main() -> None:
     for guid, category_tag in discovered_store_guids.items():
         category_by_guid.setdefault(guid, category_tag)
 
-    guids_to_populate = _build_populate_worklist(populate_list_guids, category_by_guid, allowed_categories)
+    guids_to_populate = _build_populate_worklist(
+        populate_list_guids,
+        discovered_store_guids,
+        populate_categories,
+        allowed_categories,
+    )
     if not guids_to_populate:
         if allowed_categories:
             logger.error(f"No GUIDs found for requested categories: {sorted(allowed_categories)}")

@@ -123,6 +123,8 @@ python pop-ruids.py -c back -c object
 
 When a GUID has category metadata in `populate.json`, `pop-ruids.py` preserves the API tag name when it already matches the category, such as `portal-1`.
 `pop-ruids.py` processes the union of GUIDs from `populate.txt`, `populate.json`, and any `tags/*_tags.json` entries whose GUID is still missing from the matching `guids/*_guids.json`.
+The effective priority order is `populate.txt` first, then missing GUIDs discovered from category tag stores, then the remaining `populate.json` GUIDs.
+During preprocessing, `pop-ruids.py` logs category-store scanning and candidate filtering progress so long startup phases do not appear stalled.
 When `--category` is provided, only GUIDs whose discovered category matches the requested values are processed, whether that category came from `populate.json` or an existing tag store.
 
 ## Configuration
@@ -133,9 +135,12 @@ Both scripts include configurable parameters:
 
 ```python
 COUNT = 100          # Items per API request page
-CONCURRENCY = 8      # Number of concurrent requests
+CONCURRENCY = 1      # Number of concurrent requests
 TIMEOUT_SEC = 15.0   # Request timeout in seconds
+MAX_QPS = 2.0        # Shared API request cap across all scrapers
 ```
+
+All outbound Nexon API GET requests in `gen-ruids.py` and `pop-ruids.py`, including page-count probes, are throttled through a shared 2 QPS limiter.
 
 ## Directory Structure
 

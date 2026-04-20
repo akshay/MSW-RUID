@@ -5,16 +5,54 @@ Shared functionality for interacting with the Nexon MapleStory Worlds API,
 including authentication, response parsing, and data processing utilities.
 """
 
+import asyncio
 import json
 import logging
 import os
-from typing import Dict, List, Optional, Tuple
+import time
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 import httpx
 
 CONCURRENCY = 1
 TIMEOUT_SEC = 15.0
+MAX_QPS = 2.0
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+class AsyncRateLimiter:
+    """Serialize requests so they do not exceed a target QPS."""
+
+    def __init__(self, max_qps: float,
+                 clock: Callable[[], float] = time.monotonic,
+                 sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> None:
+        if max_qps <= 0:
+            raise ValueError("max_qps must be greater than 0")
+
+        self._min_interval = 1.0 / max_qps
+        self._clock = clock
+        self._sleep = sleep
+        self._next_allowed_at = 0.0
+        self._lock = asyncio.Lock()
+
+    async def wait(self) -> None:
+        """Wait until the next request slot is available."""
+        async with self._lock:
+            now = self._clock()
+            scheduled_at = max(self._next_allowed_at, now)
+            delay = scheduled_at - now
+            if delay > 0:
+                await self._sleep(delay)
+            self._next_allowed_at = scheduled_at + self._min_interval
+
+
+API_RATE_LIMITER = AsyncRateLimiter(MAX_QPS)
+
+
+async def rate_limited_get(client: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
+    """Issue a GET request after waiting for the shared API rate limiter."""
+    await API_RATE_LIMITER.wait()
+    return await client.get(url, **kwargs)
 
 
 def get_request_headers() -> Dict[str, str]:
