@@ -74,6 +74,18 @@ def _filter_new_guids(guids_to_populate: List[str], category_by_guid: Dict[str, 
     return new_guids
 
 
+def _resolve_tag_name(item: Dict[str, str], category_tag: Optional[str], current_guid: str) -> Optional[str]:
+    """Preserve the API tag name when it already matches the category."""
+    if not category_tag or not current_guid:
+        return None
+
+    api_name = item.get('dname', '')
+    if api_name.startswith(f'{category_tag}-'):
+        return api_name
+
+    return f'{category_tag}-{current_guid}'
+
+
 async def populate_guids(guids_to_populate: List[str], category_by_guid: Dict[str, str],
                          store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]) -> None:
     """
@@ -136,11 +148,11 @@ def _parse_response(response: httpx.Response, index: int, guids_list: List[str],
 
     current_guid = guids_list[index] if index < len(guids_list) else ''
     category_tag = category_by_guid.get(current_guid)
-    tag_name = f"{category_tag}-{current_guid}" if category_tag and current_guid else None
     all_tags, all_guids = _load_output_store(category_tag, store_cache)
 
     data = response.json()
     for item in data['data']['matches']:
+        tag_name = _resolve_tag_name(item, category_tag, current_guid)
         process_api_item(item, all_tags, all_guids, tag_filter=category_tag, name_override=tag_name)
 
 

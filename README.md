@@ -121,7 +121,7 @@ python pop-ruids.py -c back -c object
 - `guids/<category>_guids.json`: Manifest-backed GUIDs are written to their category file, such as `guids/back_guids.json`
 - `tags/populate_tags.json` and `guids/populate_guids.json`: Fallback outputs for GUIDs that come only from `populate.txt` and have no category in `populate.json`
 
-When a GUID has category metadata in `populate.json`, its tag name is forced to `<category>-<guid>` in that category's tags file.
+When a GUID has category metadata in `populate.json`, `pop-ruids.py` preserves the API tag name when it already matches the category, such as `portal-1`.
 `pop-ruids.py` processes the union of GUIDs from `populate.txt` and `populate.json`.
 When `--category` is provided, only GUIDs whose `populate.json` category matches the requested values are processed.
 
