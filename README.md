@@ -80,7 +80,7 @@ For populate-only categories (for example `chatballoon`, `nametag`, `damageskin`
 
 ### pop-ruids.py - GUID-specific Resource Populator
 
-This script fetches detailed metadata for specific GUIDs listed in `populate.txt` and/or discovered in `populate.json`.
+This script fetches detailed metadata for specific GUIDs listed in `populate.txt`, discovered in `populate.json`, and auto-detected from category tag stores when a GUID is missing from the matching `guids/*_guids.json` file.
 
 This is useful for the following categories, which are not listed on the MapleStory Worlds website:
 - Name tag RUIDs
@@ -122,8 +122,8 @@ python pop-ruids.py -c back -c object
 - `tags/populate_tags.json` and `guids/populate_guids.json`: Fallback outputs for GUIDs that come only from `populate.txt` and have no category in `populate.json`
 
 When a GUID has category metadata in `populate.json`, `pop-ruids.py` preserves the API tag name when it already matches the category, such as `portal-1`.
-`pop-ruids.py` processes the union of GUIDs from `populate.txt` and `populate.json`.
-When `--category` is provided, only GUIDs whose `populate.json` category matches the requested values are processed.
+`pop-ruids.py` processes the union of GUIDs from `populate.txt`, `populate.json`, and any `tags/*_tags.json` entries whose GUID is still missing from the matching `guids/*_guids.json`.
+When `--category` is provided, only GUIDs whose discovered category matches the requested values are processed, whether that category came from `populate.json` or an existing tag store.
 
 ## Configuration
 
