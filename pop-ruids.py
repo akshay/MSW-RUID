@@ -46,6 +46,57 @@ def _get_output_paths(category_tag: Optional[str]) -> Tuple[str, str]:
     return f'tags/{output_tag}_tags.json', f'guids/{output_tag}_guids.json'
 
 
+def _is_fallback_tag(category_tag: Optional[str], tag_name: str, guid: str) -> bool:
+    """Return True when a tag is the synthetic category-guid fallback."""
+    return bool(category_tag) and tag_name == f'{category_tag}-{guid}'
+
+
+def _find_existing_tag_name(category_tag: Optional[str], guid: str, all_tags: Dict[str, str]) -> Optional[str]:
+    """Return the best existing tag name for a GUID from the current category store."""
+    if not category_tag:
+        return None
+
+    preferred_tag = None
+    fallback_tag = None
+    for tag_name, mapped_guid in all_tags.items():
+        if mapped_guid != guid or not tag_name.startswith(f'{category_tag}-'):
+            continue
+        if _is_fallback_tag(category_tag, tag_name, guid):
+            fallback_tag = tag_name
+        else:
+            preferred_tag = tag_name
+            break
+
+    return preferred_tag or fallback_tag
+
+
+def _normalize_tag_store(category_tag: Optional[str], all_tags: Dict[str, str]) -> None:
+    """Collapse duplicate GUID mappings, preferring payload-derived tags over fallback names."""
+    if not category_tag:
+        return
+
+    normalized_tags: Dict[str, str] = {}
+    seen_guids: Set[str] = set()
+    for tag_name, guid in all_tags.items():
+        if guid in seen_guids:
+            continue
+        preferred_tag = _find_existing_tag_name(category_tag, guid, all_tags) or tag_name
+        normalized_tags[preferred_tag] = guid
+        seen_guids.add(guid)
+
+    all_tags.clear()
+    all_tags.update(normalized_tags)
+
+
+def _guid_needs_reprocessing(category_tag: Optional[str], guid: str, all_tags: Dict[str, str]) -> bool:
+    """Re-fetch GUIDs whose category store still only has a synthetic fallback tag."""
+    if not category_tag:
+        return False
+
+    tag_name = _find_existing_tag_name(category_tag, guid, all_tags)
+    return tag_name is None or _is_fallback_tag(category_tag, tag_name, guid)
+
+
 def _load_output_store(category_tag: Optional[str],
                        store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]
                        ) -> Tuple[Dict[str, str], Dict[str, str]]:
@@ -53,8 +104,10 @@ def _load_output_store(category_tag: Optional[str],
     output_tag = category_tag or 'populate'
     if output_tag not in store_cache:
         tags_path, guids_path = _get_output_paths(category_tag)
+        all_tags = load_json_file(tags_path, f'{output_tag} tags')
+        _normalize_tag_store(category_tag, all_tags)
         store_cache[output_tag] = (
-            load_json_file(tags_path, f'{output_tag} tags'),
+            all_tags,
             load_json_file(guids_path, f'{output_tag} guids'),
         )
     return store_cache[output_tag]
@@ -62,20 +115,21 @@ def _load_output_store(category_tag: Optional[str],
 
 def _filter_new_guids(guids_to_populate: List[str], category_by_guid: Dict[str, str],
                       store_cache: Dict[str, Tuple[Dict[str, str], Dict[str, str]]]) -> List[str]:
-    """Keep only GUIDs that are missing from their target output store."""
+    """Keep GUIDs that are missing or still need payload-based tag repair."""
     new_guids: List[str] = []
 
     for guid in guids_to_populate:
         category_tag = category_by_guid.get(guid)
-        _, all_guids = _load_output_store(category_tag, store_cache)
-        if guid not in all_guids:
+        all_tags, all_guids = _load_output_store(category_tag, store_cache)
+        if guid not in all_guids or _guid_needs_reprocessing(category_tag, guid, all_tags):
             new_guids.append(guid)
 
     return new_guids
 
 
-def _resolve_tag_name(item: Dict[str, str], category_tag: Optional[str], current_guid: str) -> Optional[str]:
-    """Preserve the API tag name when it already matches the category."""
+def _resolve_tag_name(item: Dict[str, str], category_tag: Optional[str], current_guid: str,
+                      all_tags: Dict[str, str]) -> Optional[str]:
+    """Resolve the tag name from payload first, then existing non-fallback category tags."""
     if not category_tag or not current_guid:
         return None
 
@@ -83,7 +137,11 @@ def _resolve_tag_name(item: Dict[str, str], category_tag: Optional[str], current
     if api_name.startswith(f'{category_tag}-'):
         return api_name
 
-    return f'{category_tag}-{current_guid}'
+    existing_tag_name = _find_existing_tag_name(category_tag, current_guid, all_tags)
+    if existing_tag_name and not _is_fallback_tag(category_tag, existing_tag_name, current_guid):
+        return existing_tag_name
+
+    return None
 
 
 async def populate_guids(guids_to_populate: List[str], category_by_guid: Dict[str, str],
@@ -152,7 +210,7 @@ def _parse_response(response: httpx.Response, index: int, guids_list: List[str],
 
     data = response.json()
     for item in data['data']['matches']:
-        tag_name = _resolve_tag_name(item, category_tag, current_guid)
+        tag_name = _resolve_tag_name(item, category_tag, current_guid, all_tags)
         process_api_item(item, all_tags, all_guids, tag_filter=category_tag, name_override=tag_name)
 
 

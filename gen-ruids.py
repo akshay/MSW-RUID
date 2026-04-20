@@ -150,34 +150,33 @@ POPULATE_CATEGORIES = {
 }
 
 CATEGORIES = {
-    # 'sprite': '0',
-    # Uncomment categories below as needed:
-    # 'animationclip': '3',
+    'sprite': '0',
+    'animationclip': '3',
     # 'atlas': '2',
-    # 'audioclip': '1',
-    # 'sound': '1,19',
+    'audioclip': '1',
+    'sound': '1,19',
     # Character parts:
-    # 'body': '25,26',
-    # 'head': '25,26',
-    # 'hair': '25,27',
-    # 'face': '25,28',
-    # 'cap': '25,29',
-    # 'cape': '25,30',
-    # 'coat': '25,31',
-    # 'glove': '25,32',
-    # 'longcoat': '25,33',
-    # 'pants': '25,34',
-    # 'shoes': '25,35',
+    'body': '25,26',
+    'head': '25,26',
+    'hair': '25,27',
+    'face': '25,28',
+    'cap': '25,29',
+    'cape': '25,30',
+    'coat': '25,31',
+    'glove': '25,32',
+    'longcoat': '25,33',
+    'pants': '25,34',
+    'shoes': '25,35',
     # Accessories:
-    # 'faceaccessory': '25,37',
-    # 'eyeaccessory': '25,38',
-    # 'earaccessory': '25,39',
-    # 'ear': '25,43',
+    'faceaccessory': '25,37',
+    'eyeaccessory': '25,38',
+    'earaccessory': '25,39',
+    'ear': '25,43',
     # Weapons:
-    # 'onehandedweapon': '25,40',
-    # 'twohandedweapon': '25,41',
-    # 'shield': '25,42',
-    # 'subweapon': '25,42',
+    'onehandedweapon': '25,40',
+    'twohandedweapon': '25,41',
+    'shield': '25,42',
+    'subweapon': '25,42',
 }
 
 
